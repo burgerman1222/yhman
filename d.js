@@ -1,5 +1,4 @@
 const express = require('express');
-app.set('trust proxy', 1);
 const http = require('http');
 const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
@@ -7,29 +6,47 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
-  transports: ['websocket'],  // Only WebSocket, no polling
+  transports: ['websocket'],
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
+// PASSWORD PROTECTION
+const PASSWORD = '{}~[]#L:@l;\'<>?,./';
+
+// Middleware to protect HTTP routes
+const passwordProtection = (req, res, next) => {
+  const password = req.query.password || req.headers['x-password'];
+  if (password !== PASSWORD) {
+    return res.status(401).send('Unauthorized: Invalid password');
+  }
+  next();
+};
+
+// Socket.io authentication middleware
+io.use((socket, next) => {
+  const password = socket.handshake.auth.password || 
+                   socket.handshake.query.password;
+  if (password !== PASSWORD) {
+    return next(new Error('Authentication failed: Invalid password'));
+  }
+  next();
+});
 
 // Connected clients store: uuid -> { socket, cwd, env }
 const clients = new Map();
-
-// Viewers store: uuid -> Set of sockets
 const viewers = new Map();
-
-// Masters: Set of sockets (can be multiple)
 const masters = new Set();
 
 const publicDir = path.join(__dirname, 'public-server');
 if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
 
-// Serve terminal UI file
+// Updated HTML with password prompt
 const indexHtml = `
 <!DOCTYPE html>
 <html>
@@ -37,29 +54,103 @@ const indexHtml = `
   <title>Remote Terminal</title>
   <style>
     body, html { height: 100%; margin:0; background: #121212; color: #eee; font-family: monospace; }
-    #terminal { padding: 10px; height: 95vh; overflow-y: auto; white-space: pre-wrap; }
-    #inputLine { position: fixed; bottom: 0; width: 100%; background: #212121; padding: 5px; }
+    #terminal { padding: 10px; height: 95vh; overflow-y: auto; white-space: pre-wrap; display: none; }
+    #inputLine { position: fixed; bottom: 0; width: 100%; background: #212121; padding: 5px; display: none; }
     #cmd { width: 98%; background: transparent; border: none; color: #eee; font-family: monospace; font-size: 16px; }
     #cmd:focus { outline: none; }
     .output { margin: 2px 0; }
     .error { color: #f33; }
     .system { color: #3af; }
     .command { color: #afa; }
+    #authModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; z-index: 10000; }
+    #authBox { background: #1a1a1a; padding: 40px; border: 2px solid #0ff; border-radius: 5px; text-align: center; min-width: 350px; }
+    #authBox h2 { margin-top: 0; color: #0ff; font-size: 20px; }
+    #authBox p { color: #aaa; margin: 15px 0; }
+    #authBox input { padding: 12px; width: 100%; box-sizing: border-box; background: #0a0a0a; border: 1px solid #0ff; color: #0ff; font-family: monospace; font-size: 14px; margin: 15px 0; }
+    #authBox input:focus { outline: none; border-color: #0f0; box-shadow: 0 0 5px #0f0; }
+    #authBox button { padding: 12px 30px; background: #0ff; border: none; cursor: pointer; color: #000; font-weight: bold; font-size: 14px; margin-top: 10px; }
+    #authBox button:hover { background: #0f0; }
+    #authError { color: #f33; margin-top: 15px; display: none; font-size: 12px; }
   </style>
 </head>
 <body>
+  <div id="authModal">
+    <div id="authBox">
+      <p>Enter password to continue:</p>
+      <input type="password" id="password" placeholder="Password" autofocus />
+      <button onclick="authenticate()">Connect</button>
+      <div id="authError"></div>
+    </div>
+  </div>
   <div id="terminal"></div>
   <div id="inputLine">
-    <input type="text" id="cmd" autofocus autocomplete="off" spellcheck="false" />
+    <input type="text" id="cmd" autocomplete="off" spellcheck="false" />
   </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-  const socket = io();
+  let socket = null;
   const terminal = document.getElementById('terminal');
   const input = document.getElementById('cmd');
-
+  const authModal = document.getElementById('authModal');
+  const authError = document.getElementById('authError');
   let commandHistory = [];
   let historyIndex = -1;
+
+  function authenticate() {
+    const password = document.getElementById('password').value;
+    if (!password) {
+      authError.textContent = 'Password required';
+      authError.style.display = 'block';
+      return;
+    }
+
+    authError.style.display = 'none';
+
+    // Connect with password
+    socket = io({
+      auth: { password }
+    });
+
+    socket.on('connect', () => {
+      authModal.style.display = 'none';
+      terminal.style.display = 'block';
+      document.getElementById('inputLine').style.display = 'block';
+      input.focus();
+      appendLine('[System] Connected to server', 'system');
+      
+      const pathName = window.location.pathname;
+      if (pathName === '/master') {
+        socket.emit('register-master');
+      } else {
+        const uuid = (pathName || '/').substring(1);
+        if (uuid) {
+          socket.emit('register-viewer', uuid);
+        }
+      }
+    });
+
+    socket.on('connect_error', (error) => {
+      authError.textContent = 'Authentication failed: ' + error.message;
+      authError.style.display = 'block';
+      socket = null;
+    });
+
+    socket.on('output', data => {
+      appendLine(data);
+    });
+    socket.on('error', data => {
+      appendLine(data, 'error');
+    });
+    socket.on('system', data => {
+      appendLine(data, 'system');
+    });
+    socket.on('command', data => {
+      appendLine('> ' + data, 'command');
+    });
+    socket.on('directory', dir => {
+      document.title = 'Remote Terminal - ' + dir;
+    });
+  }
 
   function appendLine(text, cls) {
     const div = document.createElement('div');
@@ -69,33 +160,15 @@ const indexHtml = `
     terminal.scrollTop = terminal.scrollHeight;
   }
 
-  socket.on('connect', () => {
-    appendLine('[System] Connected to server', 'system');
-  });
-
-  socket.on('output', data => {
-    appendLine(data);
-  });
-  socket.on('error', data => {
-    appendLine(data, 'error');
-  });
-  socket.on('system', data => {
-    appendLine(data, 'system');
-  });
-  socket.on('command', data => {
-    appendLine('> ' + data, 'command');
-  });
-  socket.on('directory', dir => {
-    document.title = 'Remote Terminal - ' + dir;
-  });
-
   input.addEventListener('keydown', evt => {
+    if (!socket || !socket.connected) return;
+    
     if (evt.key === 'Enter') {
       const val = input.value.trim();
       if (val) {
         socket.emit('command', val);
         commandHistory.push(val);
-        historyIndex = commandHistory.length; // reset history index
+        historyIndex = commandHistory.length;
       }
       input.value = '';
     } else if (evt.key === 'ArrowUp') {
@@ -116,16 +189,9 @@ const indexHtml = `
     }
   });
 
-  // Identify page role and register
-  const pathName = window.location.pathname;
-  if (pathName === '/master') {
-    socket.emit('register-master');
-  } else {
-    const uuid = (pathName || '/').substring(1);
-    if (uuid) {
-      socket.emit('register-viewer', uuid);
-    }
-  }
+  document.getElementById('password').addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') authenticate();
+  });
 </script>
 </body>
 </html>
@@ -135,16 +201,16 @@ fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml);
 
 app.use(express.static(publicDir));
 
-// Routes:
-app.get('/master', (req, res) => {
+// Protected routes
+app.get('/master', passwordProtection, (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-app.get('/:uuid', (req, res) => {
+app.get('/:uuid', passwordProtection, (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-// Socket.io handling
+// Socket.io handling (rest of your code remains the same)
 io.on('connection', (socket) => {
   let role = null;
   let clientId = null;
@@ -152,13 +218,11 @@ io.on('connection', (socket) => {
   socket.on('register-client', (oldId) => {
     role = 'client';
     if (oldId && clients.has(oldId)) {
-      // Reconnection with known client ID
       clientId = oldId;
-      clients.get(clientId).socket = socket; // update socket ref
+      clients.get(clientId).socket = socket;
       console.log(`Client reconnected with existing UUID: ${clientId}`);
       socket.emit('registered', clientId);
     } else {
-      // New client: assign new UUID
       clientId = uuidv4();
       clients.set(clientId, {
         socket,
@@ -173,17 +237,10 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
       console.log(`Client ${clientId} disconnected`);
-      // Note: Do not delete on disconnect to allow reconnection,
-      // but could add timeout to clean stale clients if desired.
-      // For now, just notify viewers and masters.
-
-      // Notify viewers
       const conns = viewers.get(clientId);
       if (conns) {
         conns.forEach(s => s.emit('system', '[System] Client disconnected'));
       }
-
-      // Notify masters
       masters.forEach(ms => ms.emit('system', `[System] Client ${clientId} disconnected`));
     });
 
@@ -209,11 +266,6 @@ io.on('connection', (socket) => {
         set.forEach(s => s.emit('directory', dir));
       }
       masters.forEach(ms => ms.emit('system', `[${clientId}] Directory changed to: ${dir}`));
-    });
-
-    socket.on('run-command', (cmd) => {
-      // Just forward run-command events to client
-      // (This may be redundant since client listens for run-command itself)
     });
   });
 
@@ -257,7 +309,6 @@ io.on('connection', (socket) => {
     console.log('Master terminal connected');
 
     socket.on('command', (cmd) => {
-      // Broadcast command to all clients simultaneously
       clients.forEach(({ socket }) => {
         socket.emit('run-command', cmd);
       });
