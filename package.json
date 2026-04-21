@@ -1,9 +1,9 @@
 {
   "name": "remote-terminal",
   "version": "1.0.0",
-  "main": "s.js",
+  "main": "d.js",
   "scripts": {
-    "start": "node s.js"
+    "start": "node d.js"
   },
   "dependencies": {
     "express": "^5.1.0",
