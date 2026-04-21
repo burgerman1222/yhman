@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Remote Terminal</title>
+  <style>
+    body, html { height: 100%; margin:0; background: #121212; color: #eee; font-family: monospace; }
+    #terminal { padding: 10px; height: 95vh; overflow-y: auto; white-space: pre-wrap; }
+    #inputLine { position: fixed; bottom: 0; width: 100%; background: #212121; padding: 5px; }
+    #cmd { width: 98%; background: transparent; border: none; color: #eee; font-family: monospace; font-size: 16px; }
+    #cmd:focus { outline: none; }
+    .output { margin: 2px 0; }
+    .error { color: #f33; }
+    .system { color: #3af; }
+    .command { color: #afa; }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <div id="inputLine">
+    <input type="text" id="cmd" autofocus autocomplete="off" spellcheck="false" />
+  </div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const terminal = document.getElementById('terminal');
+  const input = document.getElementById('cmd');
+
+  let commandHistory = [];
+  let historyIndex = -1;
+
+  function appendLine(text, cls) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    if (cls) div.classList.add(cls);
+    terminal.appendChild(div);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  socket.on('connect', () => {
+    appendLine('[System] Connected to server', 'system');
+  });
+
+  socket.on('output', data => {
+    appendLine(data);
+  });
+  socket.on('error', data => {
+    appendLine(data, 'error');
+  });
+  socket.on('system', data => {
+    appendLine(data, 'system');
+  });
+  socket.on('command', data => {
+    appendLine('> ' + data, 'command');
+  });
+  socket.on('directory', dir => {
+    document.title = 'Remote Terminal - ' + dir;
+  });
+
+  input.addEventListener('keydown', evt => {
+    if (evt.key === 'Enter') {
+      const val = input.value.trim();
+      if (val) {
+        socket.emit('command', val);
+        commandHistory.push(val);
+        historyIndex = commandHistory.length; // reset history index
+      }
+      input.value = '';
+    } else if (evt.key === 'ArrowUp') {
+      if (commandHistory.length && historyIndex > 0) {
+        historyIndex--;
+        input.value = commandHistory[historyIndex];
+      }
+      evt.preventDefault();
+    } else if (evt.key === 'ArrowDown') {
+      if (commandHistory.length && historyIndex < commandHistory.length - 1) {
+        historyIndex++;
+        input.value = commandHistory[historyIndex];
+      } else {
+        historyIndex = commandHistory.length;
+        input.value = '';
+      }
+      evt.preventDefault();
+    }
+  });
+
+  // Identify page role and register
+  const pathName = window.location.pathname;
+  if (pathName === '/master') {
+    socket.emit('register-master');
+  } else {
+    const uuid = (pathName || '/').substring(1);
+    if (uuid) {
+      socket.emit('register-viewer', uuid);
+    }
+  }
+</script>
+</body>
+</html>
