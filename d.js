@@ -219,7 +219,7 @@ io.on('connection', (socket) => {
       masters.forEach(ms => ms.emit('system', `[System] Client ${clientId} disconnected`));
     });
 
-    socket.on('output', data => {
+    socket.on('output', (data) => {
       const set = viewers.get(clientId);
       if (set) {
         set.forEach(s => s.emit('output', `[${clientId}] ${data}`));
@@ -227,7 +227,7 @@ io.on('connection', (socket) => {
       masters.forEach(ms => ms.emit('output', `[${clientId}] ${data}`));
     });
 
-    socket.on('error', data => {
+    socket.on('error', (data) => {
       const set = viewers.get(clientId);
       if (set) {
         set.forEach(s => s.emit('error', `[${clientId}] ${data}`));
@@ -235,7 +235,7 @@ io.on('connection', (socket) => {
       masters.forEach(ms => ms.emit('error', `[${clientId}] ${data}`));
     });
 
-    socket.on('directory', dir => {
+    socket.on('directory', (dir) => {
       const set = viewers.get(clientId);
       if (set) {
         set.forEach(s => s.emit('directory', dir));
@@ -284,8 +284,8 @@ io.on('connection', (socket) => {
     console.log('Master terminal connected');
 
     socket.on('command', (cmd) => {
-      clients.forEach(({ socket }) => {
-        socket.emit('run-command', cmd);
+      clients.forEach(({ socket: clientSocket }) => {
+        clientSocket.emit('run-command', cmd);
       });
       socket.emit('command', cmd);
     });
