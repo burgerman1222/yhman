@@ -310,6 +310,7 @@ const indexHtml = `<!DOCTYPE html>
 
 fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml);
 
+app.use(express.static(publicDir));
 
 app.get('/master', (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
