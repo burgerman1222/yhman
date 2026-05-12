@@ -229,7 +229,7 @@ const indexHtml = `<!DOCTYPE html>
     socket.on('connect', () => {
       appendLine('[System] Connected to server', 'system');
       const pathName = window.location.pathname;
-      if (pathName === 'master') {
+      if (pathName === '/master') {
         socket.emit('register-master');
       } else {
         const uuid = (pathName || '/').substring(1);
