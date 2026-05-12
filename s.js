@@ -227,17 +227,21 @@ const indexHtml = `<!DOCTYPE html>
     });
 
     socket.on('connect', () => {
-      appendLine('[System] Connected to server', 'system');
-      const pathName = window.location.pathname;
-      if (pathName === '/master') {
-        socket.emit('register-master');
-      } else {
-        const uuid = (pathName || '/').substring(1);
-        if (uuid && uuid !== '') {
-          socket.emit('register-viewer', uuid);
-        }
-      }
-    });
+  appendLine('[System] Connected to server', 'system');
+  const pathName = window.location.pathname;
+  if (pathName === '/master') {
+    socket.emit('register-master');
+  } else {
+    const uuid = (pathName || '/').substring(1);
+    if (uuid && uuid !== '') {
+      socket.emit('register-viewer', uuid);
+    } else {
+      // If no UUID provided, register as a new client
+      socket.emit('register-client');
+    }
+  }
+});
+
 
     socket.on('connect_error', (error) => { appendLine('[System] Connection error: ' + (error.message || 'Unknown error'), 'error'); });
     socket.on('disconnect', (reason) => { appendLine('[System] Disconnected from server: ' + reason, 'error'); });
